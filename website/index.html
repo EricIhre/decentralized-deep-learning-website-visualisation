@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A minimal network visualisation for decentralized deep learning."
+    />
+    <title>Network Visualisation</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #000000;
+        --foreground: #ffffff;
+        --panel: rgba(22, 22, 26, 0.8);
+        --panel-border: rgba(255, 255, 255, 0.12);
+        --muted-foreground: rgba(255, 255, 255, 0.62);
+        --timeline-track: rgba(255, 255, 255, 0.08);
+        --timeline-fill: #7aa2ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .page {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        padding: 18px 20px 20px;
+      }
+
+      .timeline {
+        position: relative;
+        height: 58px;
+        margin-bottom: 12px;
+        padding: 9px 18px 10px;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        background: var(--panel);
+      }
+
+      .timeline-header {
+        position: relative;
+        display: flex;
+        align-items: center;
+        height: 18px;
+        /* Clear the play button that sits in the left gutter. */
+        padding-left: 36px;
+      }
+
+      /* Kept in sync with .panel-title so every section heading matches. */
+      .timeline-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+      }
+
+      /* Sits in the left gutter, vertically centred on the track. */
+      .timeline-toggle {
+        position: absolute;
+        left: 18px;
+        bottom: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--foreground);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+
+      .timeline-toggle:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.35);
+      }
+
+      .timeline-toggle svg {
+        width: 13px;
+        height: 13px;
+        fill: currentColor;
+      }
+
+      .timeline-toggle svg.stroke-icon {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.1;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .timeline-track {
+        position: absolute;
+        left: 54px;
+        right: 18px;
+        bottom: 14px;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--timeline-track);
+        overflow: hidden;
+      }
+
+      .timeline-fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #7aa2ff, #8fdbff);
+        transition: width 0.35s ease;
+      }
+
+      .timeline-markers {
+        position: absolute;
+        left: 54px;
+        right: 18px;
+        bottom: 8px;
+        height: 18px;
+      }
+
+      /* Transparent hit area over the track and markers, so clicking anywhere in
+         that band seeks rather than only the 12px track itself. */
+      .timeline-scrub {
+        position: absolute;
+        left: 54px;
+        right: 18px;
+        bottom: 6px;
+        height: 24px;
+        cursor: pointer;
+      }
+
+      .marker {
+        position: absolute;
+        top: 0;
+        width: 2px;
+        height: 18px;
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateX(-50%);
+      }
+
+      .content {
+        display: grid;
+        grid-template-rows: minmax(300px, 1fr) 220px;
+        height: calc(100% - 70px);
+        gap: 14px;
+      }
+
+      .network-panel {
+        position: relative;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        background: rgba(20, 20, 22, 0.9);
+        overflow: hidden;
+      }
+
+      #graph {
+        position: absolute;
+        inset: 0;
+      }
+
+      .analytics {
+        display: grid;
+        grid-template-columns: 1.45fr 1fr;
+        gap: 14px;
+      }
+
+      .panel {
+        position: relative;
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        background: var(--panel);
+        padding: 12px 14px 10px;
+      }
+
+      .panel-title {
+        margin: 0 0 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+      }
+
+      .chart-wrap {
+        position: relative;
+        height: 170px;
+      }
+
+      .matrix-wrap {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 170px;
+      }
+
+      /* Square, driven by the panel height so the cells stay on a 1:1 grid. */
+      #commMatrix {
+        height: 100%;
+        aspect-ratio: 1 / 1;
+        border-radius: 4px;
+      }
+
+      .matrix-side {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        font-size: 11px;
+        color: var(--muted-foreground);
+      }
+
+      .matrix-key {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        flex: none;
+      }
+
+      .swatch-tone {
+        background: var(--timeline-fill);
+      }
+
+      .matrix-note {
+        margin-top: 3px;
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      .placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 170px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.02);
+        color: rgba(255, 255, 255, 0.45);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="timeline" aria-label="Communication timeline">
+        <div class="timeline-header">
+          <div class="timeline-label">Communication round</div>
+        </div>
+        <button id="playPauseButton" class="timeline-toggle" type="button" aria-label="Play"></button>
+        <div class="timeline-track">
+          <div id="timelineFill" class="timeline-fill"></div>
+        </div>
+        <div id="timelineMarkers" class="timeline-markers"></div>
+        <div id="timelineScrub" class="timeline-scrub" title="Jump to round"></div>
+      </div>
+
+      <div class="content">
+        <div class="network-panel">
+          <main id="graph" aria-label="DAC network graph"></main>
+        </div>
+
+        <div class="analytics">
+          <div class="panel">
+            <h2 class="panel-title">Training loss</h2>
+            <div class="chart-wrap">
+              <canvas id="lossChart"></canvas>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2 class="panel-title">Communication matrix</h2>
+            <div class="matrix-wrap">
+              <canvas id="commMatrix" aria-label="Cumulative communication matrix"></canvas>
+              <div class="matrix-side">
+                <div class="matrix-key">
+                  <span class="swatch swatch-tone"></span>Brighter = more exchanges
+                </div>
+                <div class="matrix-note" id="matrixReadout"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/force-graph@1.51.4/dist/force-graph.min.js"></script>
+    <script>
+      const clusterColors = ["#4e79a7", "#f28e2b", "#59a14f"];
+      const GRAPH_MARGIN = 34;
+      const GRAPH_MIN_GAP = 62;
+      const LINK_RGB = "122, 162, 255";
+      const LINK_FLASH_MS = 650;
+      // Share of the flash spent extending the line before it starts fading.
+      const LINK_GROW_FRACTION = 0.45;
+      // Stiffness saturates with repeat contact: the 10th exchange between a
+      // pair moves the layout far less than the 2nd.
+      const LINK_WEIGHT_REFERENCE = 14;
+      // Every pair eventually talks at least once, so a linear pull collapses
+      // the graph into one blob. Raising the weighting to a power keeps casual
+      // contacts slack and lets only well-worn pairs draw nodes together.
+      const LINK_STIFFNESS_GAMMA = 4;
+      const LINK_STRENGTH_MIN = 0.002;
+      const LINK_STRENGTH_MAX = 1;
+      const LINK_DISTANCE_FAR = 360;
+      const LINK_DISTANCE_NEAR = 50;
+
+      let graphNodes = [];
+      let graphLinks = [];
+      let linkByPair = new Map();
+      let linkFlashStartedAt = -Infinity;
+      let graphBuiltWidth = 0;
+      let graphBuiltHeight = 0;
+
+      const graph = ForceGraph()(document.getElementById("graph"))
+        .graphData({ nodes: [], links: [] })
+        .backgroundColor("rgba(20, 20, 22, 0.9)")
+        .nodeRelSize(4)
+        .nodeColor((node) => node.color)
+        // The engine loop is also the render loop: letting it stop freezes the
+        // flash mid-extension until a zoom forces a repaint.
+        .cooldownTime(Infinity)
+        .d3AlphaDecay(0.05)
+        .d3VelocityDecay(0.45)
+        .linkCanvasObjectMode(() => "replace")
+        .linkCanvasObject(drawCommunicationLink);
+
+      graph.d3Force("charge").strength(-320);
+      // Repeat contact pulls a pair closer and holds it there more firmly.
+      graph
+        .d3Force("link")
+        .distance(
+          (link) =>
+            LINK_DISTANCE_FAR - (LINK_DISTANCE_FAR - LINK_DISTANCE_NEAR) * linkStiffness(link)
+        )
+        .strength(
+          (link) =>
+            LINK_STRENGTH_MIN + (LINK_STRENGTH_MAX - LINK_STRENGTH_MIN) * linkStiffness(link)
+        );
+
+      // Diminishing returns: log growth means each further exchange adds less
+      // than the one before it. Used directly for ink, so faint edges stay
+      // visible.
+      function linkWeighting(link) {
+        return Math.min(Math.log1p(link.weight || 0) / Math.log1p(LINK_WEIGHT_REFERENCE), 1);
+      }
+
+      function linkStiffness(link) {
+        return Math.pow(linkWeighting(link), LINK_STIFFNESS_GAMMA);
+      }
+
+      function pairKey(a, b) {
+        return a < b ? `${a}|${b}` : `${b}|${a}`;
+      }
+
+      // Rejection sampling: still a random scatter, but nodes stop landing on
+      // top of each other. Falls back to the best-spaced candidate it found.
+      function scatterPositions(count, spreadX, spreadY) {
+        const points = [];
+        for (let index = 0; index < count; index += 1) {
+          let chosen = null;
+          let chosenGap = -1;
+
+          for (let attempt = 0; attempt < 60; attempt += 1) {
+            const x = (Math.random() - 0.5) * spreadX;
+            const y = (Math.random() - 0.5) * spreadY;
+            let gap = Infinity;
+            points.forEach((point) => {
+              gap = Math.min(gap, Math.hypot(point.x - x, point.y - y));
+            });
+
+            if (gap >= GRAPH_MIN_GAP) {
+              chosen = { x, y };
+              break;
+            }
+            if (gap > chosenGap) {
+              chosenGap = gap;
+              chosen = { x, y };
+            }
+          }
+
+          points.push(chosen);
+        }
+        return points;
+      }
+
+      // Scattered at random as a starting arrangement only; from here the
+      // accumulated edges pull the network into shape.
+      function buildGraphNodes() {
+        const source = experimentData.length ? experimentData[0].nodes || [] : [];
+        const container = document.getElementById("graph");
+        // force-graph otherwise sizes its canvas to the viewport, which spills
+        // out of this panel and clips the lower nodes.
+        graphBuiltWidth = container.clientWidth || 900;
+        graphBuiltHeight = container.clientHeight || 500;
+        graph.width(graphBuiltWidth).height(graphBuiltHeight);
+
+        // Scatter straight into the panel's own pixel box, so a plain 1:1 zoom
+        // frames every node without depending on a fit animation.
+        const spreadX = Math.max(graphBuiltWidth - GRAPH_MARGIN * 2, 120);
+        const spreadY = Math.max(graphBuiltHeight - GRAPH_MARGIN * 2, 120);
+        const positions = scatterPositions(source.length, spreadX, spreadY);
+        graphNodes = source.map((node, index) => {
+          const { x, y } = positions[index];
+          return {
+            id: node.id,
+            cluster: node.cluster,
+            color: clusterColors[node.cluster % clusterColors.length],
+            x,
+            y,
+            val: 5
+          };
+        });
+
+        linkByPair = new Map();
+        graphLinks = [];
+        graph.graphData({ nodes: graphNodes, links: [] });
+        graph.centerAt(0, 0);
+        graph.zoom(1);
+      }
+
+      function drawCommunicationLink(link, ctx, globalScale) {
+        const from = link.source;
+        const to = link.target;
+        if (!from || !to || typeof from.x !== "number" || typeof to.x !== "number") {
+          return;
+        }
+
+        // The standing edge: brighter and thicker the more the pair has talked.
+        const weighting = linkWeighting(link);
+        ctx.strokeStyle = `rgba(${LINK_RGB}, ${0.05 + weighting * 0.4})`;
+        ctx.lineWidth = (0.35 + weighting * 1.7) / globalScale;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+
+        if (!link.flash) {
+          return;
+        }
+
+        const progress = (performance.now() - linkFlashStartedAt) / LINK_FLASH_MS;
+        if (progress < 0 || progress >= 1) {
+          return;
+        }
+
+        // Light runs out of the sampling client towards the peer it pulls from,
+        // then fades once it lands.
+        const reach = Math.min(progress / LINK_GROW_FRACTION, 1);
+        const fade =
+          progress < LINK_GROW_FRACTION
+            ? 1
+            : 1 - (progress - LINK_GROW_FRACTION) / (1 - LINK_GROW_FRACTION);
+
+        const head = link.flash.from === from.id ? from : to;
+        const tail = head === from ? to : from;
+
+        ctx.strokeStyle = `rgba(255, 255, 255, ${fade * 0.85})`;
+        ctx.lineWidth = 1.6 / globalScale;
+        ctx.beginPath();
+        ctx.moveTo(head.x, head.y);
+        ctx.lineTo(head.x + (tail.x - head.x) * reach, head.y + (tail.y - head.y) * reach);
+        ctx.stroke();
+      }
+
+      function updateGraphForRound() {
+        if (!graphNodes.length) {
+          return;
+        }
+
+        const lastRound = Math.min(currentRound, experimentData.length - 1);
+
+        // Weights are rebuilt from round zero so scrubbing backwards agrees
+        // with the chart and matrix. Link objects are reused rather than
+        // recreated, so d3 keeps its existing state and the layout does not
+        // jump when the set changes.
+        linkByPair.forEach((link) => {
+          link.weight = 0;
+          link.flash = null;
+        });
+
+        for (let round = 0; round <= lastRound; round += 1) {
+          communicationsAt(round).forEach((comm) => {
+            const key = pairKey(comm.source, comm.target);
+            let link = linkByPair.get(key);
+            if (!link) {
+              link = { source: comm.source, target: comm.target, weight: 0, flash: null };
+              linkByPair.set(key, link);
+            }
+            link.weight += 1;
+          });
+        }
+
+        // Only this round's exchanges carry the light.
+        communicationsAt(lastRound).forEach((comm) => {
+          const link = linkByPair.get(pairKey(comm.source, comm.target));
+          if (link) {
+            link.flash = { from: comm.source };
+          }
+        });
+
+        const nextLinks = [];
+        linkByPair.forEach((link) => {
+          if (link.weight > 0) {
+            nextLinks.push(link);
+          }
+        });
+
+        const changed =
+          nextLinks.length !== graphLinks.length || nextLinks.some((l, i) => l !== graphLinks[i]);
+        graphLinks = nextLinks;
+
+        // Re-seating graphData restarts the simulation, so only do it when the
+        // edge set actually changed; otherwise just nudge the layout.
+        if (changed) {
+          graph.graphData({ nodes: graphNodes, links: graphLinks });
+        }
+        graph.d3ReheatSimulation();
+
+        linkFlashStartedAt = communicationsAt(lastRound).length ? performance.now() : -Infinity;
+      }
+
+      const timelineFill = document.getElementById("timelineFill");
+      const timelineMarkers = document.getElementById("timelineMarkers");
+      const playPauseButton = document.getElementById("playPauseButton");
+      const timelineScrub = document.getElementById("timelineScrub");
+      const matrixCanvas = document.getElementById("commMatrix");
+      const matrixContext = matrixCanvas.getContext("2d");
+      const matrixReadout = document.getElementById("matrixReadout");
+
+      const MATRIX_EMPTY = [23, 23, 27];
+      // Matches --timeline-fill so the matrix reads as part of the same control.
+      const MATRIX_TONE = [122, 162, 255];
+      // Pair counts are heavily skewed towards low values (median 4 against a
+      // peak of 26), so a gamma below 1 keeps mid-range pairs visible instead
+      // of crushing them into the background.
+      const MATRIX_GAMMA = 0.65;
+      const MATRIX_FLASH = [255, 255, 255];
+      // Long enough to register, short enough to clear before the next round.
+      const MATRIX_FLASH_MS = 420;
+      const MATRIX_FLASH_PEAK = 0.9;
+
+      let clientIndex = new Map();
+      let clientClusters = [];
+      let matrixCounts = null;
+      let matrixScaleMax = 1;
+      let matrixFlashMask = null;
+      let flashLevel = 0;
+      let flashStartedAt = 0;
+      let flashFrame = null;
+
+      let currentRound = 0;
+      let isPlaying = false;
+      let timer = null;
+      let lossChart = null;
+      let experimentData = [];
+      let totalRounds = 0;
+
+      function buildTimelineMarkers() {
+        timelineMarkers.innerHTML = "";
+        for (let i = 0; i <= totalRounds; i += 1) {
+          const marker = document.createElement("span");
+          marker.className = "marker";
+          marker.style.left = `${(i / totalRounds) * 100}%`;
+          timelineMarkers.appendChild(marker);
+        }
+      }
+
+      function updateTimeline() {
+        const lastIndex = experimentData.length - 1;
+        const progress = lastIndex > 0 ? (currentRound / lastIndex) * 100 : 0;
+        timelineFill.style.width = `${progress}%`;
+      }
+
+      const ICONS = {
+        play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6L19 12z" /></svg>',
+        pause:
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.8" y="5.2" width="3.8" height="13.6" rx="1.2" /><rect x="13.4" y="5.2" width="3.8" height="13.6" rx="1.2" /></svg>',
+        replay:
+          '<svg class="stroke-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 3.5V9h-5.5" /></svg>',
+      };
+
+      // True once the last round has been reached, so the button can offer a restart.
+      function isAtEnd() {
+        return experimentData.length > 1 && currentRound >= experimentData.length - 1;
+      }
+
+      function updatePlayButton() {
+        const mode = isPlaying ? "pause" : isAtEnd() ? "replay" : "play";
+        const label = mode === "pause" ? "Pause" : mode === "replay" ? "Replay" : "Play";
+        playPauseButton.innerHTML = ICONS[mode];
+        playPauseButton.setAttribute("aria-label", label);
+        playPauseButton.title = label;
+      }
+
+      function setPlaying(nextState) {
+        isPlaying = nextState;
+        updatePlayButton();
+
+        if (isPlaying) {
+          clearInterval(timer);
+          timer = setInterval(() => {
+            if (currentRound >= experimentData.length - 1) {
+              setPlaying(false);
+              return;
+            }
+
+            currentRound += 1;
+            renderRound();
+            updateTimeline();
+          }, 900);
+        } else {
+          clearInterval(timer);
+        }
+      }
+
+      function communicationsAt(roundIndex) {
+        const state = experimentData[roundIndex];
+        return (state && state.communications) || [];
+      }
+
+      // Client ids, cluster membership and the colour ceiling are fixed for a
+      // run, so they are derived once instead of on every round.
+      function prepareMatrix() {
+        const firstNodes = experimentData.length ? experimentData[0].nodes || [] : [];
+        clientIndex = new Map(firstNodes.map((node, index) => [node.id, index]));
+        clientClusters = firstNodes.map((node) => node.cluster);
+
+        const size = firstNodes.length;
+        matrixCounts = new Uint16Array(size * size);
+        matrixFlashMask = new Uint8Array(size * size);
+        if (!size) {
+          return;
+        }
+
+        // Scale against the busiest pair of the whole run so the grid brightens
+        // monotonically as rounds accumulate, rather than rescaling each step.
+        const totals = new Uint16Array(size * size);
+        let peak = 1;
+        experimentData.forEach((_, roundIndex) => {
+          communicationsAt(roundIndex).forEach((comm) => {
+            const source = clientIndex.get(comm.source);
+            const target = clientIndex.get(comm.target);
+            if (source === undefined || target === undefined) {
+              return;
+            }
+            const cell = source * size + target;
+            totals[cell] += 1;
+            peak = Math.max(peak, totals[cell]);
+          });
+        });
+        matrixScaleMax = peak;
+      }
+
+      function mixChannels(from, to, amount) {
+        return [
+          from[0] + (to[0] - from[0]) * amount,
+          from[1] + (to[1] - from[1]) * amount,
+          from[2] + (to[2] - from[2]) * amount
+        ];
+      }
+
+      function rgbString(channels) {
+        return `rgb(${Math.round(channels[0])}, ${Math.round(channels[1])}, ${Math.round(
+          channels[2]
+        )})`;
+      }
+
+      function drawMatrix() {
+        const size = clientClusters.length;
+        const extent = matrixCanvas.clientWidth;
+        if (!size || !matrixCounts || !extent) {
+          return;
+        }
+
+        const ratio = window.devicePixelRatio || 1;
+        const backing = Math.round(extent * ratio);
+        if (matrixCanvas.width !== backing) {
+          matrixCanvas.width = backing;
+          matrixCanvas.height = backing;
+        }
+        matrixContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        matrixContext.clearRect(0, 0, extent, extent);
+
+        const cell = extent / size;
+        for (let source = 0; source < size; source += 1) {
+          for (let target = 0; target < size; target += 1) {
+            const cellIndex = source * size + target;
+            let fill;
+            if (source === target) {
+              // A client never samples itself, so the diagonal stays black.
+              fill = "#000000";
+            } else {
+              const count = matrixCounts[cellIndex];
+              const intensity = count
+                ? Math.min(Math.pow(count / matrixScaleMax, MATRIX_GAMMA), 1)
+                : 0;
+              const settled = mixChannels(MATRIX_EMPTY, MATRIX_TONE, intensity);
+              // Pairs that exchanged this round wash out towards white, then
+              // decay back to their accumulated colour.
+              fill =
+                flashLevel > 0 && matrixFlashMask[cellIndex]
+                  ? rgbString(mixChannels(settled, MATRIX_FLASH, flashLevel * MATRIX_FLASH_PEAK))
+                  : rgbString(settled);
+            }
+
+            matrixContext.fillStyle = fill;
+            // Rows are the sampling client, columns the sampled neighbour. The
+            // slight overdraw hides seams from fractional cell positions.
+            matrixContext.fillRect(target * cell, source * cell, cell + 0.5, cell + 0.5);
+          }
+        }
+
+        // Cluster boundaries make the 10x10 blocks readable at this size.
+        matrixContext.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        matrixContext.lineWidth = 1;
+        matrixContext.beginPath();
+        for (let index = 1; index < size; index += 1) {
+          if (clientClusters[index] === clientClusters[index - 1]) {
+            continue;
+          }
+          const position = Math.round(index * cell) + 0.5;
+          matrixContext.moveTo(position, 0);
+          matrixContext.lineTo(position, extent);
+          matrixContext.moveTo(0, position);
+          matrixContext.lineTo(extent, position);
+        }
+        matrixContext.stroke();
+      }
+
+      function stepFlash(now) {
+        const elapsed = now - flashStartedAt;
+        const progress = Math.min(elapsed / MATRIX_FLASH_MS, 1);
+        // Instant on, eased decay, so the flash reads as a pulse.
+        flashLevel = (1 - progress) * (1 - progress);
+        drawMatrix();
+
+        flashFrame = progress < 1 ? requestAnimationFrame(stepFlash) : null;
+      }
+
+      function flashRound(roundIndex) {
+        if (flashFrame !== null) {
+          cancelAnimationFrame(flashFrame);
+          flashFrame = null;
+        }
+
+        matrixFlashMask.fill(0);
+        flashLevel = 0;
+
+        const size = clientClusters.length;
+        let flagged = 0;
+        communicationsAt(roundIndex).forEach((comm) => {
+          const source = clientIndex.get(comm.source);
+          const target = clientIndex.get(comm.target);
+          if (source === undefined || target === undefined) {
+            return;
+          }
+          matrixFlashMask[source * size + target] = 1;
+          flagged += 1;
+        });
+
+        if (!flagged) {
+          drawMatrix();
+          return;
+        }
+
+        flashLevel = 1;
+        flashStartedAt = performance.now();
+        // Drawn synchronously so the round is correct even if the tab is
+        // backgrounded and animation frames are throttled.
+        drawMatrix();
+        flashFrame = requestAnimationFrame(stepFlash);
+      }
+
+      function updateMatrixForRound() {
+        const size = clientClusters.length;
+        if (!size || !matrixCounts) {
+          return;
+        }
+
+        // Recomputed from round zero so seeking backwards is correct; at 50
+        // rounds x 90 exchanges this is a few thousand operations.
+        matrixCounts.fill(0);
+        const lastRound = Math.min(currentRound, experimentData.length - 1);
+        for (let round = 0; round <= lastRound; round += 1) {
+          communicationsAt(round).forEach((comm) => {
+            const source = clientIndex.get(comm.source);
+            const target = clientIndex.get(comm.target);
+            if (source === undefined || target === undefined) {
+              return;
+            }
+            matrixCounts[source * size + target] += 1;
+          });
+        }
+
+        // The readout describes this round alone; the cell colours carry the
+        // accumulated history.
+        const roundComms = communicationsAt(lastRound);
+        const withinCluster = roundComms.filter((comm) => comm.sameCluster).length;
+        const roundLabel = experimentData[lastRound] ? experimentData[lastRound].round : lastRound;
+        matrixReadout.textContent = roundComms.length
+          ? `Round ${roundLabel} · ${withinCluster} of ${roundComms.length} within cluster (${Math.round(
+              (withinCluster / roundComms.length) * 100
+            )}%)`
+          : `Round ${roundLabel} · no exchanges yet`;
+
+        flashRound(lastRound);
+      }
+
+      function renderRound() {
+        updateChartForRound();
+        updateMatrixForRound();
+        updateGraphForRound();
+      }
+
+      // Jump straight to a round, redrawing the loss history up to that point.
+      // Playback is left running if it was already running.
+      function seekToRound(roundIndex) {
+        const lastIndex = experimentData.length - 1;
+        if (lastIndex < 0) {
+          return;
+        }
+
+        currentRound = Math.min(Math.max(roundIndex, 0), lastIndex);
+        renderRound();
+        updateTimeline();
+        updatePlayButton();
+      }
+
+      function formatLoss(value) {
+        if (value >= 1000) {
+          return `${Math.round(value / 100) / 10}k`;
+        }
+        return value >= 10 ? String(Math.round(value)) : value.toFixed(1);
+      }
+
+      // Chart.js needs explicit {x, y} points here: the x scale is linear, so a
+      // string label such as "R0" would parse to NaN and drop the whole series.
+      function buildVisibleSeries(clusterIndex, roundIndex) {
+        return experimentData.slice(0, roundIndex + 1).map((state) => ({
+          x: state.round,
+          y: Number(state.clusterAverageValidationLoss[clusterIndex])
+        }));
+      }
+
+      function updateChartForRound() {
+        if (!lossChart || !experimentData.length) {
+          return;
+        }
+
+        lossChart.data.datasets.forEach((dataset, clusterIndex) => {
+          dataset.data = buildVisibleSeries(clusterIndex, currentRound);
+        });
+
+        // "none" keeps the drawn history still and only extends the leading edge.
+        lossChart.update("none");
+      }
+
+      function initializeChart() {
+        const allLosses = experimentData
+          .flatMap((state) => state.clusterAverageValidationLoss)
+          .map(Number)
+          .filter((value) => Number.isFinite(value) && value > 0);
+        const low = Math.min(...allLosses);
+        const high = Math.max(...allLosses);
+        const firstRound = experimentData[0].round;
+
+        lossChart = new Chart(document.getElementById("lossChart"), {
+          type: "line",
+          data: {
+            datasets: clusterColors.map((color, clusterIndex) => ({
+              label: `Cluster ${clusterIndex + 1}`,
+              data: [],
+              borderColor: color,
+              backgroundColor: color + "33",
+              borderWidth: 2,
+              // Mark only the leading edge so the current round stays readable.
+              pointRadius: (context) =>
+                context.dataIndex === context.dataset.data.length - 1 ? 3.5 : 0,
+              pointHoverRadius: 4,
+              pointBackgroundColor: color,
+              pointBorderColor: color,
+              tension: 0.25,
+              fill: false
+            }))
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: {
+              mode: "index",
+              intersect: false
+            },
+            plugins: {
+              legend: {
+                display: true,
+                labels: {
+                  color: "rgba(255,255,255,0.8)",
+                  usePointStyle: true,
+                  boxWidth: 8,
+                  boxHeight: 8
+                }
+              },
+              tooltip: {
+                enabled: true,
+                callbacks: {
+                  title: (items) => `Round ${items[0].parsed.x}`,
+                  label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(1)}`
+                }
+              }
+            },
+            scales: {
+              x: {
+                type: "linear",
+                min: firstRound,
+                max: totalRounds,
+                ticks: {
+                  maxTicksLimit: 11,
+                  color: "rgba(255,255,255,0.7)",
+                  callback: (value) => `R${value}`
+                },
+                grid: {
+                  color: "rgba(255,255,255,0.08)"
+                },
+                border: {
+                  color: "rgba(255,255,255,0.18)"
+                }
+              },
+              y: {
+                // Losses span roughly 2500 down to 9, so a log scale keeps the
+                // three clusters separable across the whole run.
+                type: "logarithmic",
+                min: low * 0.8,
+                max: high * 1.25,
+                ticks: {
+                  color: "rgba(255,255,255,0.7)",
+                  callback: (value) =>
+                    Number.isInteger(Math.log10(value)) ? formatLoss(value) : ""
+                },
+                grid: {
+                  color: "rgba(255,255,255,0.08)"
+                },
+                border: {
+                  color: "rgba(255,255,255,0.18)"
+                }
+              }
+            }
+          }
+        });
+      }
+
+      const DATA_DIRECTORY = "../decentralized_deep_learning/Data_for_viz";
+      const STRATEGY = "dac";
+
+      // The three-strategy export is the current source; the older single-run
+      // replay is kept as a fallback so the page still works without it.
+      function loadReplay() {
+        return fetch(`${DATA_DIRECTORY}/toy_regression_three_strategies.json`)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to load data: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then((payload) => payload.strategies[STRATEGY].states)
+          .catch(() =>
+            fetch(`${DATA_DIRECTORY}/toy_regression_replay.json`)
+              .then((response) => {
+                if (!response.ok) {
+                  throw new Error(`Failed to load data: ${response.status}`);
+                }
+                return response.json();
+              })
+              .then((payload) => payload.states)
+          );
+      }
+
+      loadReplay()
+        .then((states) => {
+          experimentData = states || [];
+          totalRounds = experimentData.length > 0 ? experimentData[experimentData.length - 1].round : 0;
+          currentRound = 0;
+
+          buildTimelineMarkers();
+          initializeChart();
+          prepareMatrix();
+          buildGraphNodes();
+          renderRound();
+          updateTimeline();
+          updatePlayButton();
+        })
+        .catch((error) => {
+          console.error("Unable to load visualization data", error);
+          const placeholder = document.getElementById("lossChart");
+          const context = placeholder.getContext("2d");
+          context.fillStyle = "#ffffff";
+          context.font = "16px sans-serif";
+          context.fillText("Unable to load training loss data", 24, 80);
+        });
+
+      timelineScrub.addEventListener("click", (event) => {
+        const lastIndex = experimentData.length - 1;
+        if (lastIndex <= 0) {
+          return;
+        }
+
+        const bounds = timelineScrub.getBoundingClientRect();
+        const fraction = (event.clientX - bounds.left) / bounds.width;
+        seekToRound(Math.round(fraction * lastIndex));
+      });
+
+      playPauseButton.addEventListener("click", () => {
+        // Finished runs restart from the first round instead of toggling.
+        if (!isPlaying && isAtEnd()) {
+          currentRound = 0;
+          renderRound();
+          updateTimeline();
+        }
+
+        setPlaying(!isPlaying);
+      });
+
+      // Both canvases are sized from their layout boxes, so they need to follow
+      // the panel when the window changes.
+      window.addEventListener("resize", () => {
+        drawMatrix();
+
+        if (!graphBuiltWidth || !graphBuiltHeight) {
+          return;
+        }
+        const container = document.getElementById("graph");
+        const width = container.clientWidth || graphBuiltWidth;
+        const height = container.clientHeight || graphBuiltHeight;
+        graph.width(width).height(height);
+        // Nodes keep their built positions, so shrink the zoom to keep the
+        // whole scatter in view.
+        graph.zoom(Math.min(1, width / graphBuiltWidth, height / graphBuiltHeight));
+        graph.centerAt(0, 0);
+      });
+    </script>
+  </body>
+</html>
